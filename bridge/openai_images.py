@@ -13,7 +13,6 @@ import sqlite3
 from threading import Lock
 import time
 from uuid import NAMESPACE_URL, uuid4, uuid5
-from urllib.parse import quote
 
 from PIL import Image
 
@@ -26,17 +25,20 @@ MAX_RESPONSE = 8 * 1024 * 1024
 MAYA_REFERENCES = ("maya-face.jpg", "maya-outfit.jpg", "maya-full.jpg", "maya-angle.jpg", "maya-front.jpg")
 TOOL = {
     "name": "generate_image",
-    "version": "v2",
+    "version": "v3",
     "description": (
-        "Generate one original image using OpenAI and deliver it where the request originated. "
-        "Call only when the user explicitly asks to generate, draw, or make a picture. "
-        "Send only the image brief. Set include_maya=true when the user asks to include Maya or yourself. "
-        "This queues the job, so tell the user it is being generated "
-        "and repeat the provided link exactly when one is returned."
+        "Generate one image on explicit request. Set show_on_screen=true only if the user asks to show it "
+        "on your screen or the Codie display. Otherwise return the chat link exactly as given. "
+        "Send only the image brief. Set include_maya=true if asked to include Maya or yourself. "
+        "Tell the user when generation is queued."
     ),
     "parameters": {"type": "object", "additionalProperties": False, "required": ["prompt"],
                    "properties": {"prompt": {"type": "string", "minLength": 3, "maxLength": 800},
-                                  "include_maya": {"type": "boolean"}}},
+                                  "include_maya": {"type": "boolean"},
+                                  "show_on_screen": {
+                                      "type": "boolean",
+                                      "description": "Set true only for an explicit request to use Codie’s physical screen.",
+                                  }}},
     "result_schema": {"type": "object", "additionalProperties": False, "required": ["status", "detail"],
                       "properties": {"status": {"type": "string"}, "detail": {"type": "string"},
                                      "url": {"type": "string"}}},
@@ -120,21 +122,9 @@ class ImageWorker:
                        "(id TEXT PRIMARY KEY, accepted_at INTEGER NOT NULL)")
 
     def native_request(self, call, arguments):
-        slot = self.api.request("GET", "/data/user/slot")["slot_number"]
-        lane = "chat"
-        for turn_id in dict.fromkeys((call.get("turn_id"), call.get("session_id"))):
-            if not turn_id:
-                continue
-            try:
-                turn = self.api.request("GET", "/data/user/chat/turns/" + quote(str(turn_id), safe=""))
-            except self.api_error as error:
-                if error.status not in {403, 404}:
-                    raise
-                continue
-            if (turn.get("input_type") in {"device_microphone", "audio_file", "audio_stream"}
-                    and turn.get("output", {}).get("speech") == "device"):
-                lane = "screen"
-            break
+        show = arguments.get("show_on_screen") is True
+        lane = "screen" if show else "chat"
+        slot = self.api.request("GET", "/data/user/slot")["slot_number"] if show else None
         return self.enqueue(call["invocation_id"], arguments.get("prompt"), lane, slot,
                             include_maya=arguments.get("include_maya") is True)
 
@@ -150,6 +140,8 @@ class ImageWorker:
         if lane == "chat":
             result["url"] = f"{self.origin}/image/{job}"
             result["detail"] = "Open the image link to view it when ready."
+        if lane == "screen":
+            result["detail"] = "The bridge will show the picture on Codie’s screen when it is ready."
         if lane == "discord":
             result["job"] = job
         with self.lock:
@@ -195,12 +187,14 @@ class ImageWorker:
                     outcome = "generated"
                     if lane == "screen":
                         self.console.record(TOOL["name"], outcome, started)
-                        wait_idle(self.api, slot, time.monotonic() + 40)
-                        if self.console.tool_allowed(TOOL["name"], {}):
-                            if self.api.request("GET", "/data/user/device/state").get("screen_on") is False:
+                        if (self.console.tool_allowed(TOOL["name"], {})
+                                and self.api.request("GET", "/data/user/slot")["slot_number"] == slot):
+                            display = self.api.request("GET", "/data/user/device/state")
+                            if not display.get("locked") and display.get("screen_on") is False:
                                 self.api.request("PUT", "/data/user/device/screen", {"on": True})
-                            if show_picture(self.api, job, image):
-                                outcome = "displayed"
+                        wait_idle(self.api, slot, time.monotonic() + 40)
+                        if self.console.tool_allowed(TOOL["name"], {}) and show_picture(self.api, job, image):
+                            outcome = "displayed"
             except (OSError, ValueError, KeyError, IndexError, TypeError, http.client.HTTPException, self.api_error) as error:
                 LOG.warning("OpenAI image job %s: %s", job, str(error) if isinstance(error, ImageError) else type(error).__name__)
             if outcome != "generated" or lane != "screen":

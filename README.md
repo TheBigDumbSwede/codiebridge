@@ -9,7 +9,7 @@ A Raspberry Pi gives Codie a gateway to services and hardware it cannot reach di
 | Physical status panel | Use an Elgato Stream Deck to show status on LCD keys and send button presses to an adapter. |
 | Pi web console | See connections and tool activity, and manage which tools and Home Assistant entities Codie can use. |
 | Discord chat | Talk to Codie in a Discord text channel. Choose the channel and turn the connector on or off from the Pi web console. |
-| OpenAI image generation | Ask for an image on demand. Discord receives an attachment, and Codie chat receives a private console link. |
+| OpenAI image generation | Ask for an image on demand. Say “show it on your screen” to use Codie’s display. Codie chat can return a private link, and Discord receives an attachment. |
 | Voice announcements | A Nest doorbell ring or person event makes the active character speak. |
 | Device status and control | Ask whether a light is on or turn on an allowed Hue light. |
 | Door camera, on demand | Ask whether there is snow outside. Codie speaks and saves the text reply. Ask to show the front door to display the same still for 20 seconds. |

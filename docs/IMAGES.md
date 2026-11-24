@@ -1,6 +1,6 @@
 # OpenAI image generation
 
-Set up the [Pi web console](CONSOLE.md#enable-the-console) first. The Pi sends an image brief to the OpenAI Images API and delivers the result where Codie received the request. Image generation is billed to the OpenAI API project you supply.
+Set up the [Pi web console](CONSOLE.md#enable-the-console) first. The Pi sends an image brief to the OpenAI Images API. Image generation is billed to the OpenAI API project you supply.
 
 ## Install and enable
 
@@ -25,9 +25,9 @@ sudo systemctl try-restart codie-discord
 
 ## Request and delivery
 
-- In **Discord**, mention the bot and ask in your own words. For example, “Could you make a photorealistic portrait of yourself in a winter observatory?” The bot replies with an attachment in that channel. You can use Discord’s Reply to ask for a variation. Requests to describe an image stay text-only.
-- In **Codie chat**, ask for an image. The reply can include an authenticated link to the result on the Pi. Generated chat images are held in memory for up to an hour or until the bridge restarts.
-- **Audio sent to Codie** uses the device screen when Codie’s API confirms the originating turn was audio with device output. When the origin cannot be verified, the bridge returns a chat link and leaves the screen alone. Native microphone turns may not expose enough metadata for automatic screen routing.
+- On **Codie**, say “Make me a picture of a moonlit pond and show it on your screen.” The explicit screen request sends the picture to Codie’s physical display when it’s ready.
+- For other **Codie** image requests, the reply includes an authenticated link to the result on the Pi. Generated chat images are held in memory for up to an hour or until the bridge restarts.
+- In **Discord**, mention the bot and ask in your own words. For example, “Could you make a photorealistic portrait of yourself in a winter observatory?” The bot always delivers the image as an attachment in that channel. Use Discord’s Reply to ask for a variation. Requests to describe an image stay text-only.
 
 The bridge allows five accepted image requests per day across these sources. The count resets at midnight in the Pi’s time zone. The console records the queue and generation or display outcomes without saving the image brief.
 
