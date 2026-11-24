@@ -20,6 +20,8 @@ from uuid import UUID, uuid4
 import paho.mqtt.client as mqtt
 import websocket
 
+import bridge_console
+import discord_link
 import front_camera
 import home_devices
 
@@ -28,6 +30,8 @@ CODIE_PORT = 8081
 INTEGRATION_ID = os.environ.get("CODIE_INTEGRATION_ID", "")
 ENABLE_HOME = os.environ.get("CODIE_ENABLE_HOME") == "1"
 ENABLE_CAMERA = ENABLE_HOME and os.environ.get("CODIE_ENABLE_CAMERA") == "1"
+ENABLE_CONSOLE = os.environ.get("CODIE_ENABLE_CONSOLE") == "1"
+ENABLE_DISCORD = os.environ.get("CODIE_ENABLE_DISCORD") == "1"
 TOPIC = "codie/bridge/announce"
 ROOT = "/v1/api"
 CATALOG_PATH = f"/data/user/tool-integrations/{INTEGRATION_ID}"
@@ -157,12 +161,16 @@ def register_tool(api, catalog):
     })
 
 
-def tool_loop(api, camera_pending):
+def tool_catalog():
     catalog = list(TOOLS)
     if ENABLE_HOME:
         catalog.extend((home_devices.STATUS, home_devices.CONTROL))
     if ENABLE_CAMERA:
         catalog.append(front_camera.TOOL)
+    return catalog
+
+
+def tool_loop(api, camera_pending, catalog, console):
     registered = False
     delay = 1
     while True:
@@ -171,6 +179,8 @@ def tool_loop(api, camera_pending):
                 register_tool(api, catalog)
                 registered = True
             for conn in api.executor():
+                if console:
+                    console.executor_online = True
                 logging.info("Codie tool executor online")
                 delay = 1
                 while raw := conn.recv():
@@ -181,21 +191,30 @@ def tool_loop(api, camera_pending):
                     status = "succeeded"
                     name = call.get("name")
                     response = {"invocation_id": call["invocation_id"]}
-                    if name == "bridge_status":
+                    started = time.monotonic()
+                    arguments = call.get("arguments") or {}
+                    blocked = console is not None and not console.tool_allowed(name, arguments)
+                    if blocked:
+                        status = "failed"
+                        response["code"] = "TOOL_ACCESS_BLOCKED"
+                        result = {"detail": "This tool or device is blocked by the bridge owner."}
+                    elif name == "bridge_status":
                         proof = f"BRIDGE-{uuid4().hex[:8].upper()}"
                         result = {"hostname": socket.gethostname(), "proof": proof}
                         logging.info("Codie invoked bridge_status, proof=%s", proof)
                     elif ENABLE_CAMERA and name == front_camera.TOOL["name"]:
                         try:
-                            result = front_camera.submit(api, camera_pending, call.get("arguments") or {})
+                            result = front_camera.submit(api, camera_pending, arguments)
                         except (OSError, ValueError, TypeError, KeyError, APIError):
                             status = "failed"
                             response["code"] = "FRONT_DOOR_CAMERA_NOT_QUEUED"
                             result = {"status": "unavailable", "detail": "The camera request could not be queued."}
                     elif ENABLE_HOME and name in {"home_device_status", "home_device_control"}:
-                        arguments = call.get("arguments") or {}
                         try:
-                            result = home_devices.invoke(name, arguments)
+                            if console and name == "home_device_status":
+                                result = console.visible_home_status(arguments)
+                            else:
+                                result = home_devices.invoke(name, arguments)
                             logging.info("%s succeeded (target=%s, action=%s, reported_state=%s)",
                                          name, arguments.get("entity_id", arguments.get("domain", "")),
                                          arguments.get("action", ""), result.get("device", {}).get("state", ""))
@@ -209,6 +228,8 @@ def tool_loop(api, camera_pending):
                         status = "failed"
                         response["code"] = "UNKNOWN_TOOL"
                         result = {}
+                    if console:
+                        console.record(name, "blocked" if blocked else status, started)
                     response.update(status=status, data=result)
                     conn.send(json.dumps({"type": "result", "data": response}))
         except (OSError, ValueError, APIError, RuntimeError, websocket.WebSocketException) as error:
@@ -216,6 +237,8 @@ def tool_loop(api, camera_pending):
             logging.warning("Codie tool link disconnected (%s)", type(error).__name__)
             if isinstance(error, websocket.WebSocketBadStatusException) and error.status_code == 404:
                 registered = False
+        if console:
+            console.executor_online = False
         time.sleep(delay)
         delay = min(delay * 2, 30)
 
@@ -264,10 +287,23 @@ def on_connect(client, userdata, flags, reason_code, properties):
         logging.warning("MQTT connection failed: %s", reason_code)
         return
     client.subscribe(TOPIC, qos=1)
-    logging.info("Subscribed to MQTT topic %s", TOPIC)
+    logging.info("Subscribing to MQTT topic %s", TOPIC)
 
 
-def on_message(client, pending, message):
+def on_subscribe(client, userdata, mid, reason_codes, properties):
+    _, console = userdata
+    if console:
+        console.mqtt_online = bool(reason_codes) and not any(code.is_failure for code in reason_codes)
+
+
+def on_disconnect(client, userdata, flags, reason_code, properties):
+    _, console = userdata
+    if console:
+        console.mqtt_online = False
+
+
+def on_message(client, userdata, message):
+    pending, _ = userdata
     if message.retain or len(message.payload) > 2048:
         return
     try:
@@ -282,14 +318,24 @@ def on_message(client, pending, message):
 
 
 def serve(api):
+    catalog = tool_catalog()
+    console = None
+    if ENABLE_CONSOLE:
+        home_status = (lambda arguments: home_devices.invoke("home_device_status", arguments)) if ENABLE_HOME else None
+        console = bridge_console.Console(os.environ["STATE_DIRECTORY"], catalog, home_status)
+        console.start()
+    if ENABLE_DISCORD:
+        Thread(target=discord_link.serve, args=(api, wait_for_task), daemon=True).start()
     pending = Queue(maxsize=10)
     camera_pending = Queue(maxsize=1)
     if ENABLE_CAMERA:
         Thread(target=front_camera.run, args=(api, camera_pending, wait_for_task, announce, APIError), daemon=True).start()
-    Thread(target=tool_loop, args=(api, camera_pending), daemon=True).start()
+    Thread(target=tool_loop, args=(api, camera_pending, catalog, console), daemon=True).start()
     Thread(target=announcement_loop, args=(api, pending), daemon=True).start()
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, userdata=pending)
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, userdata=(pending, console))
     client.on_connect = on_connect
+    client.on_subscribe = on_subscribe
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
     client.connect_async("127.0.0.1", 1883)
     client.loop_forever(retry_first_connection=True)

@@ -1,0 +1,12 @@
+[Unit]
+Description=Codie web console Discord control socket
+
+[Socket]
+ListenStream=/run/codie-console-discord.sock
+SocketGroup=codie-console-control
+SocketMode=0660
+Accept=yes
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target

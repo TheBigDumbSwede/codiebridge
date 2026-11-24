@@ -6,6 +6,8 @@ After=network-online.target mosquitto.service
 [Service]
 Type=simple
 DynamicUser=yes
+StateDirectory=codie-spellbook-console
+StateDirectoryMode=0700
 SupplementaryGroups=codie-spellbook
 EnvironmentFile=/etc/codie-spellbook/bridge.env
 LoadCredential=codie.json:/etc/codie-spellbook/codie.json

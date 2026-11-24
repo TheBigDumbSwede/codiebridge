@@ -1,0 +1,19 @@
+[Unit]
+Description=Codie Spellbook Discord connector
+After=network-online.target codie-spellbook.service
+Wants=network-online.target codie-spellbook.service
+
+[Service]
+Type=simple
+DynamicUser=yes
+SupplementaryGroups=codie-discord-link
+RuntimeDirectory=codie-discord
+RuntimeDirectoryMode=0755
+LoadCredential=token:/etc/codie-discord/token
+LoadCredential=channel.json:/etc/codie-discord/channel.json
+ExecStart=/usr/bin/python3 -B /opt/codie-spellbook/bridge/discord_worker.py
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077

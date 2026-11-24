@@ -1,0 +1,16 @@
+[Unit]
+Description=Handle one Discord control request from the Codie web console
+
+[Service]
+ExecStart=/usr/bin/python3 -I /opt/codie-spellbook/bridge/discord_control.py
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+RuntimeMaxSec=35s
+StateDirectory=codie-console-discord
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/etc/codie-discord
