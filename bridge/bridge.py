@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from queue import Full, Queue
 import socket
+import sqlite3
 import sys
 from threading import Thread
 import time
@@ -24,6 +25,7 @@ import bridge_console
 import discord_link
 import front_camera
 import home_devices
+import openai_images
 
 CODIE_HOST = os.environ.get("CODIE_HOST", "")
 CODIE_PORT = 8081
@@ -32,6 +34,7 @@ ENABLE_HOME = os.environ.get("CODIE_ENABLE_HOME") == "1"
 ENABLE_CAMERA = ENABLE_HOME and os.environ.get("CODIE_ENABLE_CAMERA") == "1"
 ENABLE_CONSOLE = os.environ.get("CODIE_ENABLE_CONSOLE") == "1"
 ENABLE_DISCORD = os.environ.get("CODIE_ENABLE_DISCORD") == "1"
+ENABLE_IMAGES = ENABLE_CONSOLE and os.environ.get("CODIE_ENABLE_IMAGES") == "1"
 TOPIC = "codie/bridge/announce"
 ROOT = "/v1/api"
 CATALOG_PATH = f"/data/user/tool-integrations/{INTEGRATION_ID}"
@@ -161,12 +164,14 @@ def register_tool(api, catalog):
     })
 
 
-def tool_catalog():
+def tool_catalog(images=False):
     catalog = list(TOOLS)
     if ENABLE_HOME:
         catalog.extend((home_devices.STATUS, home_devices.CONTROL))
     if ENABLE_CAMERA:
         catalog.append(front_camera.TOOL)
+    if images:
+        catalog.append(openai_images.TOOL)
     return catalog
 
 
@@ -198,6 +203,16 @@ def tool_loop(api, camera_pending, catalog, console):
                         status = "failed"
                         response["code"] = "TOOL_ACCESS_BLOCKED"
                         result = {"detail": "This tool or device is blocked by the bridge owner."}
+                        if name == openai_images.TOOL["name"]:
+                            result = {"status": "blocked", "detail": "Image generation is off in the Pi console."}
+                    elif name == openai_images.TOOL["name"] and console and console.image_worker:
+                        try:
+                            result = console.image_worker.native_request(call, arguments)
+                        except (OSError, ValueError, KeyError, TypeError, sqlite3.Error, APIError) as error:
+                            status = "failed"
+                            response["code"] = "IMAGE_REQUEST_REJECTED"
+                            detail = str(error) if isinstance(error, openai_images.ImageError) else "The Pi could not queue the image."
+                            result = {"status": "failed", "detail": detail}
                     elif name == "bridge_status":
                         proof = f"BRIDGE-{uuid4().hex[:8].upper()}"
                         result = {"hostname": socket.gethostname(), "proof": proof}
@@ -229,7 +244,10 @@ def tool_loop(api, camera_pending, catalog, console):
                         response["code"] = "UNKNOWN_TOOL"
                         result = {}
                     if console:
-                        console.record(name, "blocked" if blocked else status, started)
+                        outcome = "blocked" if blocked else status
+                        if name == openai_images.TOOL["name"] and result.get("status") == "queued":
+                            outcome = "queued"
+                        console.record(name, outcome, started)
                     response.update(status=status, data=result)
                     conn.send(json.dumps({"type": "result", "data": response}))
         except (OSError, ValueError, APIError, RuntimeError, websocket.WebSocketException) as error:
@@ -318,14 +336,22 @@ def on_message(client, userdata, message):
 
 
 def serve(api):
-    catalog = tool_catalog()
+    key = openai_images.read_key() if ENABLE_IMAGES else ""
+    if ENABLE_IMAGES and not key:
+        logging.warning("No OpenAI image credential loaded")
+    catalog = tool_catalog(bool(key))
     console = None
+    images = None
     if ENABLE_CONSOLE:
         home_status = (lambda arguments: home_devices.invoke("home_device_status", arguments)) if ENABLE_HOME else None
         console = bridge_console.Console(os.environ["STATE_DIRECTORY"], catalog, home_status)
+        if key:
+            images = openai_images.ImageWorker(api, console, key, APIError)
+            console.image_worker = images
+            Thread(target=images.run, daemon=True).start()
         console.start()
     if ENABLE_DISCORD:
-        Thread(target=discord_link.serve, args=(api, wait_for_task), daemon=True).start()
+        Thread(target=discord_link.serve, args=(api, wait_for_task, images), daemon=True).start()
     pending = Queue(maxsize=10)
     camera_pending = Queue(maxsize=1)
     if ENABLE_CAMERA:

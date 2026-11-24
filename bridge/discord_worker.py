@@ -1,6 +1,8 @@
 """Discord chat adapter for a single authorized channel."""
 import asyncio
+import base64
 from collections import OrderedDict
+from io import BytesIO
 import json
 import logging
 import os
@@ -21,13 +23,15 @@ def state(name):
     entry.replace(RUNTIME / "state")
 
 
-async def local_call(operation, question=None, history=None):
+async def local_call(operation, question=None, history=None, request_id=None):
     async with asyncio.timeout(70):
-        reader, writer = await asyncio.open_unix_connection(LINK)
+        reader, writer = await asyncio.open_unix_connection(LINK, limit=524288)
         try:
             request = {"operation": operation}
             if question is not None:
                 request["question"] = question
+            if request_id is not None:
+                request["id"] = request_id
             if history:
                 request["history"] = history
             writer.write(json.dumps(request, ensure_ascii=False).encode() + b"\n")
@@ -108,16 +112,44 @@ class Bot(discord.Client):
         async with self.busy:
             try:
                 async with message.channel.typing():
-                    result = await local_call("ask", question, history)
-                answer = str(result["answer"])[:1500]
+                    result = await local_call("respond", question, history, request_id=str(message.id))
             except (OSError, ValueError, KeyError, RuntimeError, TimeoutError, discord.HTTPException) as exc:
                 LOG.warning("Codie message failed (%s)", type(exc).__name__)
                 await message.reply("I couldn't get a reply from Codie. Try again in a moment.", mention_author=False)
                 return
-            sent = await message.reply(answer, mention_author=False)
-            self.reply_history[sent.id] = (history + [[question[:200], answer[:300]]])[-2:]
-            if len(self.reply_history) > 64:
-                self.reply_history.popitem(last=False)
+        if result.get("kind") == "image":
+            await self.respond_image(message, question, history, result)
+            return
+        answer = str(result["answer"])[:1500]
+        sent = await message.reply(answer, mention_author=False)
+        self.remember_reply(sent.id, history, question, answer)
+
+    def remember_reply(self, message_id, history, question, answer):
+        self.reply_history[message_id] = (history + [[question[:200], answer[:300]]])[-2:]
+        if len(self.reply_history) > 64:
+            self.reply_history.popitem(last=False)
+
+    async def respond_image(self, message, question, history, result):
+        try:
+            if result["status"] != "queued":
+                await message.reply(result["detail"], mention_author=False)
+                return
+            job = result["job"]
+            brief = result["prompt"]
+            notice = await message.reply("I’ll post the image here when it’s ready.", mention_author=False)
+            async with asyncio.timeout(180):
+                while result["status"] == "queued":
+                    await asyncio.sleep(2)
+                    result = await local_call("image_status", request_id=job)
+            if result["status"] == "generated":
+                with BytesIO(base64.b64decode(result["image"], validate=True)) as image:
+                    sent = await message.reply(file=discord.File(image, filename="maya-image.jpg"), mention_author=False)
+                    self.remember_reply(sent.id, history, question, "Generated a Discord image. Image brief: " + brief)
+            else:
+                await notice.edit(content="I couldn’t generate that image.")
+        except (OSError, ValueError, KeyError, RuntimeError, TimeoutError, discord.HTTPException) as error:
+            LOG.warning("Discord image request failed (%s)", type(error).__name__)
+            await message.reply("I couldn’t deliver that image.", mention_author=False)
 
     async def setup_hook(self):
         guild = await self.fetch_guild(self.guild.id)

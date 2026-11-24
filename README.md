@@ -9,6 +9,7 @@ A Raspberry Pi gives Codie a gateway to services and hardware it cannot reach di
 | Physical status panel | Use an Elgato Stream Deck to show status on LCD keys and send button presses to an adapter. |
 | Pi web console | See connections and tool activity, and manage which tools and Home Assistant entities Codie can use. |
 | Discord chat | Talk to Codie in a Discord text channel. Choose the channel and turn the connector on or off from the Pi web console. |
+| OpenAI image generation | Ask for an image on demand. Discord receives an attachment, and Codie chat receives a private console link. |
 | Voice announcements | A Nest doorbell ring or person event makes the active character speak. |
 | Device status and control | Ask whether a light is on or turn on an allowed Hue light. |
 | Door camera, on demand | Ask whether there is snow outside. Codie speaks and saves the text reply. Ask to show the front door to display the same still for 20 seconds. |
@@ -20,6 +21,7 @@ A Raspberry Pi gives Codie a gateway to services and hardware it cannot reach di
 2. Read [Use the Pi as a gateway](docs/GATEWAYS.md) to connect a remote MCP, relay external Pub/Sub events, accept LAN MQTT publications, or attach an Elgato Stream Deck.
 3. Optionally add [Home Assistant device access](docs/SETUP.md#2-add-home-assistant-device-access), [doorbell and porch examples](docs/SETUP.md#3-add-doorbell-announcements-and-porch-lighting), or [on-demand camera questions](docs/SETUP.md#4-enable-on-demand-camera-questions).
 4. Optionally enable the [Pi web console and Discord connector](docs/CONSOLE.md).
+5. Optionally enable [OpenAI image generation](docs/IMAGES.md).
 
 ## What is in the bundle
 
