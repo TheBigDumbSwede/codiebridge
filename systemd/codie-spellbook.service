@@ -1,0 +1,22 @@
+[Unit]
+Description=Codie Pi Bridge Spellbook
+Wants=network-online.target mosquitto.service
+After=network-online.target mosquitto.service
+
+[Service]
+Type=simple
+DynamicUser=yes
+SupplementaryGroups=codie-spellbook
+EnvironmentFile=/etc/codie-spellbook/bridge.env
+LoadCredential=codie.json:/etc/codie-spellbook/codie.json
+ExecStart=/usr/bin/python3 -B /opt/codie-spellbook/bridge/bridge.py serve
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

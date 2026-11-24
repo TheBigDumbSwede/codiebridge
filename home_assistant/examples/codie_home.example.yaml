@@ -1,0 +1,6 @@
+# Merge this top-level section into Home Assistant configuration.yaml.
+codie_home:
+  read_entities: []
+  write_entities: []
+  # Add and uncomment only if you want on-demand stills.
+  # front_door_camera: camera.replace_with_nest_doorbell

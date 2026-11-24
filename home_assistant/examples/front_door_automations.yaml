@@ -1,0 +1,117 @@
+- id: codie_front_door_ring
+  alias: Codie announces a front doorbell ring
+  triggers:
+    - trigger: event.received
+      target:
+        entity_id: event.replace_with_nest_chime
+      options:
+        event_type: ring
+  actions:
+    - action: shell_command.codie_front_door_ring
+  mode: single
+
+- id: codie_front_door_person
+  alias: Codie announces a person at the front door
+  triggers:
+    - trigger: event.received
+      target:
+        entity_id: event.replace_with_nest_motion
+      options:
+        event_type: camera_person
+  actions:
+    - action: shell_command.codie_front_door_person
+  mode: single
+
+- id: porch_light_door_activity
+  alias: Porch light follows front-door activity
+  triggers:
+    - trigger: event.received
+      id: person
+      target:
+        entity_id: event.replace_with_nest_motion
+      options:
+        event_type: camera_person
+    - trigger: event.received
+      id: motion
+      target:
+        entity_id: event.replace_with_nest_motion
+      options:
+        event_type: camera_motion
+    - trigger: event.received
+      id: ring
+      target:
+        entity_id: event.replace_with_nest_chime
+      options:
+        event_type: ring
+    - trigger: event
+      id: cleanup
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.porch_light_door_activity
+    - trigger: homeassistant
+      event: start
+      id: cleanup
+    - trigger: state
+      id: cleanup
+      entity_id: light.replace_with_porch_light
+      to:
+        - "on"
+        - "off"
+  actions:
+    - variables:
+        event_id: "{{ trigger.id | default('person') }}"
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ event_id == 'cleanup' }}"
+            - condition: state
+              entity_id: timer.porch_light_door_activity
+              state: idle
+            - condition: state
+              entity_id: input_boolean.porch_light_door_automation
+              state: "on"
+            - condition: template
+              value_template: "{{ states('light.replace_with_porch_light') in ['on', 'off'] }}"
+          sequence:
+            - if:
+                - condition: state
+                  entity_id: light.replace_with_porch_light
+                  state: "on"
+              then:
+                - action: light.turn_off
+                  target:
+                    entity_id: light.replace_with_porch_light
+            - action: input_boolean.turn_off
+              target:
+                entity_id: input_boolean.porch_light_door_automation
+        - conditions:
+            - condition: template
+              value_template: "{{ event_id in ['person', 'motion', 'ring'] }}"
+            - condition: state
+              entity_id: input_boolean.porch_light_door_automation
+              state: "on"
+            - condition: state
+              entity_id: timer.porch_light_door_activity
+              state: active
+          sequence:
+            - action: timer.start
+              target:
+                entity_id: timer.porch_light_door_activity
+        - conditions:
+            - condition: template
+              value_template: "{{ event_id == 'person' }}"
+            - condition: state
+              entity_id: light.replace_with_porch_light
+              state: "off"
+          sequence:
+            - action: timer.start
+              target:
+                entity_id: timer.porch_light_door_activity
+            - action: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.porch_light_door_automation
+            - action: light.turn_on
+              target:
+                entity_id: light.replace_with_porch_light
+  mode: queued
+  max: 10

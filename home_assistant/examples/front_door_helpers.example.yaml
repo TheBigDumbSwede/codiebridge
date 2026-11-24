@@ -1,0 +1,14 @@
+# Merge these entries with existing sections instead of duplicating a YAML key.
+shell_command:
+  codie_front_door_ring: python3 /config/codie_front_door.py ring
+  codie_front_door_person: python3 /config/codie_front_door.py person
+
+input_boolean:
+  porch_light_door_automation:
+    name: Porch light turned on by door activity
+
+timer:
+  porch_light_door_activity:
+    name: Porch light inactivity timer
+    duration: "00:03:00"
+    restore: true
