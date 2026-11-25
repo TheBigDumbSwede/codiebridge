@@ -24,7 +24,7 @@ def state(name):
 
 
 async def local_call(operation, question=None, history=None, request_id=None):
-    async with asyncio.timeout(70):
+    async with asyncio.timeout(105 if operation == "respond" else 70):
         reader, writer = await asyncio.open_unix_connection(LINK, limit=524288)
         try:
             request = {"operation": operation}

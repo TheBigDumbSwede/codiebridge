@@ -25,6 +25,11 @@ PORT = 8788
 DISCORD_CONTROL = "/run/codie-console-discord.sock"
 DISCORD_CHANNEL_ID = re.compile(r"[1-9][0-9]{0,19}\Z")
 IMAGE_TOOL = "generate_image"
+OPINION_TOOL = "second_opinion"
+OPTIONAL_TOOLS = {
+    IMAGE_TOOL: ("image generation", " · Five requests per day"),
+    OPINION_TOOL: ("second opinions", ""),
+}
 ENTITY_ID = re.compile(r"[a-z0-9_]+\.[a-z0-9_]+\Z")
 LABELS = {
     "bridge_status": "Bridge status",
@@ -32,6 +37,7 @@ LABELS = {
     "home_device_control": "Home Assistant control",
     "front_door_snapshot": "Front door snapshot",
     IMAGE_TOOL: "OpenAI image generation",
+    OPINION_TOOL: "OpenAI second opinion",
 }
 MODES = {"default": "Existing access", "read": "Read only", "hidden": "Hidden"}
 PAGE_SIZE = 10
@@ -55,6 +61,7 @@ class Console:
         self.tools = {entry["name"]: entry for entry in catalog}
         self.home_status = home_status
         self.image_worker = None
+        self.opinion = None
         self.csrf = secrets.token_urlsafe(32)
         self.executor_online = False
         self.mqtt_online = False
@@ -81,7 +88,7 @@ class Console:
 
     def tool_allowed(self, name, arguments):
         try:
-            default = "off" if name == IMAGE_TOOL else "on"
+            default = "off" if name in OPTIONAL_TOOLS else "on"
             if self.access("tool").get(name, default) == "off":
                 return False
             if name == "home_device_control":
@@ -122,7 +129,7 @@ class Console:
         if not valid:
             raise ValueError("Invalid permission")
         with self.connect() as db:
-            if mode == "default" or (mode == "on" and name != IMAGE_TOOL):
+            if mode == "default" or (mode == "on" and name not in OPTIONAL_TOOLS):
                 db.execute("DELETE FROM access WHERE kind = ? AND name = ?", (kind, name))
             else:
                 db.execute("INSERT OR REPLACE INTO access VALUES (?, ?, ?)", (kind, name, mode))
@@ -215,19 +222,22 @@ class Console:
             f'<small>{escape(name)}</small></div>'
             + self.form("tool", name, {"on": "Allowed", "off": "Blocked"}, tool_access.get(name, "on"),
                         LABELS.get(name, name))
-            + "</div>" for name in self.tools if name != IMAGE_TOOL
+            + "</div>" for name in self.tools if name not in OPTIONAL_TOOLS
         )
-        if IMAGE_TOOL in self.tools:
-            enabled = tool_access.get(IMAGE_TOOL) == "on"
+        for name, (caption, detail) in OPTIONAL_TOOLS.items():
+            if name not in self.tools:
+                continue
+            enabled = tool_access.get(name) == "on"
             action = "off" if enabled else "on"
-            label = "Turn off image generation" if enabled else "Turn on image generation"
+            label = f"Turn {action} {caption}"
+            title = LABELS[name]
             tools += (
-                '<div class="row"><div><strong>OpenAI image generation</strong>'
-                f'<small>{"On" if enabled else "Off"} · Five requests per day</small></div>'
-                '<form method="post" action="/access" aria-label="OpenAI image generation">'
+                f'<div class="row"><div><strong>{title}</strong>'
+                f'<small>{"On" if enabled else "Off"}{detail}</small></div>'
+                f'<form method="post" action="/access" aria-label="{title}">'
                 f'<input type="hidden" name="csrf" value="{self.csrf}">'
                 '<input type="hidden" name="kind" value="tool">'
-                f'<input type="hidden" name="name" value="{IMAGE_TOOL}">'
+                f'<input type="hidden" name="name" value="{name}">'
                 f'<button type="submit" name="mode" value="{action}">{label}</button></form></div>'
             )
         entity_access = self.access("entity")

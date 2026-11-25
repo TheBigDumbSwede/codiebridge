@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """LAN bridge between Codie's external tool API and a local MQTT broker."""
 
+from functools import partial
 from getpass import getpass
 import hashlib
 import hmac
@@ -26,6 +27,7 @@ import discord_link
 import front_camera
 import home_devices
 import openai_images
+import second_opinion
 
 CODIE_HOST = os.environ.get("CODIE_HOST", "")
 CODIE_PORT = 8081
@@ -35,6 +37,7 @@ ENABLE_CAMERA = ENABLE_HOME and os.environ.get("CODIE_ENABLE_CAMERA") == "1"
 ENABLE_CONSOLE = os.environ.get("CODIE_ENABLE_CONSOLE") == "1"
 ENABLE_DISCORD = os.environ.get("CODIE_ENABLE_DISCORD") == "1"
 ENABLE_IMAGES = ENABLE_CONSOLE and os.environ.get("CODIE_ENABLE_IMAGES") == "1"
+ENABLE_OPINION = ENABLE_CONSOLE and os.environ.get("CODIE_ENABLE_SECOND_OPINION") == "1"
 TOPIC = "codie/bridge/announce"
 ROOT = "/v1/api"
 CATALOG_PATH = f"/data/user/tool-integrations/{INTEGRATION_ID}"
@@ -164,7 +167,7 @@ def register_tool(api, catalog):
     })
 
 
-def tool_catalog(images=False):
+def tool_catalog(images=False, opinion=False):
     catalog = list(TOOLS)
     if ENABLE_HOME:
         catalog.extend((home_devices.STATUS, home_devices.CONTROL))
@@ -172,6 +175,8 @@ def tool_catalog(images=False):
         catalog.append(front_camera.TOOL)
     if images:
         catalog.append(openai_images.TOOL)
+    if opinion:
+        catalog.append(second_opinion.TOOL)
     return catalog
 
 
@@ -205,6 +210,15 @@ def tool_loop(api, camera_pending, catalog, console):
                         result = {"detail": "This tool or device is blocked by the bridge owner."}
                         if name == openai_images.TOOL["name"]:
                             result = {"status": "blocked", "detail": "Image generation is off in the Pi console."}
+                        elif name == second_opinion.TOOL["name"]:
+                            result = {"status": "blocked", "detail": "Second opinions are off in the Pi console."}
+                    elif name == second_opinion.TOOL["name"] and console and console.opinion:
+                        try:
+                            result = console.opinion(arguments)
+                        except second_opinion.OpinionError as error:
+                            status = "failed"
+                            response["code"] = "SECOND_OPINION_UNAVAILABLE"
+                            result = {"status": "failed", "detail": str(error)}
                     elif name == openai_images.TOOL["name"] and console and console.image_worker:
                         try:
                             result = console.image_worker.native_request(call, arguments)
@@ -336,22 +350,27 @@ def on_message(client, userdata, message):
 
 
 def serve(api):
-    key = openai_images.read_key() if ENABLE_IMAGES else ""
-    if ENABLE_IMAGES and not key:
-        logging.warning("No OpenAI image credential loaded")
-    catalog = tool_catalog(bool(key))
+    key = openai_images.read_key() if ENABLE_IMAGES or ENABLE_OPINION else ""
+    if (ENABLE_IMAGES or ENABLE_OPINION) and not key:
+        logging.warning("No OpenAI credential loaded")
+    catalog = tool_catalog(images=bool(key) and ENABLE_IMAGES, opinion=bool(key) and ENABLE_OPINION)
     console = None
     images = None
+    opinion = None
     if ENABLE_CONSOLE:
         home_status = (lambda arguments: home_devices.invoke("home_device_status", arguments)) if ENABLE_HOME else None
         console = bridge_console.Console(os.environ["STATE_DIRECTORY"], catalog, home_status)
-        if key:
+        if key and ENABLE_IMAGES:
             images = openai_images.ImageWorker(api, console, key, APIError)
             console.image_worker = images
             Thread(target=images.run, daemon=True).start()
+        if key and ENABLE_OPINION:
+            opinion = partial(second_opinion.consult, key, console)
+            console.opinion = opinion
         console.start()
     if ENABLE_DISCORD:
-        Thread(target=discord_link.serve, args=(api, wait_for_task, images), daemon=True).start()
+        record_activity = console.record if console else None
+        Thread(target=discord_link.serve, args=(api, wait_for_task, images, opinion, record_activity), daemon=True).start()
     pending = Queue(maxsize=10)
     camera_pending = Queue(maxsize=1)
     if ENABLE_CAMERA:

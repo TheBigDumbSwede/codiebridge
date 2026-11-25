@@ -10,6 +10,7 @@ A Raspberry Pi gives Codie a gateway to services and hardware it cannot reach di
 | Pi web console | See connections and tool activity, and manage which tools and Home Assistant entities Codie can use. |
 | Discord chat | Talk to Codie in a Discord text channel. Choose the channel and turn the connector on or off from the Pi web console. |
 | OpenAI image generation | Ask for an image on demand. Say “show it on your screen” to use Codie’s display. Codie chat can return a private link, and Discord receives an attachment. |
+| OpenAI second opinion | Ask Codie to consult another model and compare its assessment in the original conversation. |
 | Voice announcements | A Nest doorbell ring or person event makes the active character speak. |
 | Device status and control | Ask whether a light is on or turn on an allowed Hue light. |
 | Door camera, on demand | Ask whether there is snow outside. Codie speaks and saves the text reply. Ask to show the front door to display the same still for 20 seconds. |
@@ -22,6 +23,7 @@ A Raspberry Pi gives Codie a gateway to services and hardware it cannot reach di
 3. Optionally add [Home Assistant device access](docs/SETUP.md#2-add-home-assistant-device-access), [doorbell and porch examples](docs/SETUP.md#3-add-doorbell-announcements-and-porch-lighting), or [on-demand camera questions](docs/SETUP.md#4-enable-on-demand-camera-questions).
 4. Optionally enable the [Pi web console and Discord connector](docs/CONSOLE.md).
 5. Optionally enable [OpenAI image generation](docs/IMAGES.md).
+6. Optionally enable [OpenAI second opinions](docs/SECOND-OPINION.md).
 
 ## What is in the bundle
 
